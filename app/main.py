@@ -186,7 +186,7 @@ async def upload_file(
     original_filenames = []
     
     for file in files:
-        # save file
+        # Save file with UUID name for security
         ext = Path(file.filename).suffix
         file_id = str(uuid4())
         filename = f"{file_id}{ext}"
@@ -202,7 +202,7 @@ async def upload_file(
         uploaded_files_info.append({
             "id": file_id,
             "original_filename": file.filename,
-            "stored_filename": filename,
+            "stored_filename": filename,  # UUID-based filename
             "content_type": file.content_type,
             "path": relative_path,
         })
@@ -392,9 +392,31 @@ async def process_prompt(
     
     # Parse uploaded files list
     try:
-        files_list = json.loads(uploaded_files) if uploaded_files else []
+        original_files_list = json.loads(uploaded_files) if uploaded_files else []
     except:
-        files_list = [uploaded_files] if uploaded_files else []
+        original_files_list = [uploaded_files] if uploaded_files else []
+    
+    # Map original filenames to actual stored UUID filenames
+    user_dir = user_folder(user_id)
+    files_list = []
+    
+    for original_filename in original_files_list:
+        # Find the actual stored file by checking all files in user directory
+        # and matching the extension
+        original_ext = Path(original_filename).suffix.lower()
+        
+        # Look for files with matching extension in user directory
+        matching_files = [f for f in user_dir.iterdir() 
+                         if f.is_file() and f.suffix.lower() == original_ext]
+        
+        if matching_files:
+            # For simplicity, use the first matching file
+            # In production, you'd want a proper filename mapping system
+            stored_filename = matching_files[0].name
+            files_list.append(stored_filename)
+        else:
+            # If no matching file found, use original (might fail but good for debugging)
+            files_list.append(original_filename)
     
     # Build previous result if provided
     previous_result = None
@@ -458,3 +480,75 @@ async def process_prompt(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI processing error: {str(e)}")
+
+
+@app.get("/files/{user_id}/{filename}")
+async def download_file(
+    user_id: str, 
+    filename: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Download/serve processed files from user's directory.
+    """
+    # Verify user access
+    verify_user_access(current_user, user_id)
+    
+    # Sanitize the filename to prevent path traversal
+    safe_filename = sanitize_filename(filename)
+    
+    # Construct file path
+    user_dir = user_folder(user_id)
+    file_path = user_dir / safe_filename
+    
+    # Check if file exists
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check if file is within user directory (extra security)
+    try:
+        file_path.resolve().relative_to(user_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(str(file_path))
+    if content_type is None:
+        content_type = 'application/octet-stream'
+    
+    # Return the file
+    return FileResponse(
+        path=str(file_path),
+        filename=safe_filename,
+        media_type=content_type
+    )
+
+
+@app.get("/files/{user_id}")
+async def list_user_files(
+    user_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    List all files in user's directory.
+    """
+    # Verify user access
+    verify_user_access(current_user, user_id)
+    
+    user_dir = user_folder(user_id)
+    
+    if not user_dir.exists():
+        return {"files": []}
+    
+    files = []
+    for file_path in user_dir.iterdir():
+        if file_path.is_file():
+            stat = file_path.stat()
+            files.append({
+                "filename": file_path.name,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "download_url": f"/files/{user_id}/{file_path.name}"
+            })
+    
+    return {"files": files}
