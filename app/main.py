@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import settings
 from .db import SupabaseClient
 from .security import get_current_user, verify_user_access, sanitize_filename
+from .ai_agent import get_agent
 from datetime import datetime
 
 app = FastAPI(title="refile-backend", version="0.1")
@@ -40,8 +41,9 @@ async def upload_file(
 ):
     """Upload a file and save prompt in Supabase.
 
-    Saves uploaded file to user-specific folder and records a prompt entry in Supabase.
-    Returns a JSON object with metadata and a placeholder `ai_response` field (empty for now).
+    Saves uploaded file to user-specific folder, processes with AI agent,
+    and records everything in Supabase.
+    Returns a JSON object with metadata and AI-generated command.
     
     Security: Only authenticated users can upload files to their own folder.
     """
@@ -57,7 +59,35 @@ async def upload_file(
         content = await file.read()
         f.write(content)
 
-    # create DB record
+    # Process with AI agent
+    try:
+        agent = get_agent()
+        ai_response = agent.process_request(
+            user_prompt=prompt,
+            uploaded_files=[file.filename],
+            user_id=user_id,
+            previous_result=None
+        )
+        
+        # Extract structured response
+        structured_resp = ai_response.get('structured_response')
+        ai_result = {
+            "linux_command": structured_resp.linux_command if structured_resp else None,
+            "input_files": structured_resp.input_files if structured_resp else [],
+            "output_files": structured_resp.output_files if structured_resp else [],
+            "description": structured_resp.description if structured_resp else None,
+        }
+    except Exception as e:
+        # If AI processing fails, continue without it
+        print(f"AI processing error: {e}")
+        ai_result = {
+            "linux_command": None,
+            "input_files": [],
+            "output_files": [],
+            "description": f"AI processing failed: {str(e)}",
+        }
+
+    # create DB record with AI response
     record = {
         "user_id": user_id,
         "prompt": prompt,
@@ -78,7 +108,7 @@ async def upload_file(
         "stored_filename": filename,
         "content_type": file.content_type,
         "path": str(dest),
-    }, "prompt_record": db_res, "ai_response": None}
+    }, "prompt_record": db_res, "ai_response": ai_result}
 
 
 @app.get("/api/list/{user_id}")
@@ -136,3 +166,91 @@ def download_file(
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/api/process")
+async def process_prompt(
+    prompt: str = Form(...),
+    uploaded_files: str = Form(...),  # JSON string of filenames
+    previous_command: str = Form(None),
+    previous_input_files: str = Form(None),
+    previous_output_files: str = Form(None),
+    previous_description: str = Form(None),
+    current_user: str = Depends(get_current_user)
+):
+    """Process a prompt with AI agent for follow-up commands.
+    
+    This endpoint allows users to have a conversation with the AI agent
+    without uploading new files. Useful for follow-up requests like:
+    "Convert that audio to WAV format"
+    
+    Args:
+        prompt: User's natural language request
+        uploaded_files: JSON string list of available filenames
+        previous_*: Previous AI response for conversation continuity
+        
+    Returns:
+        AI-generated command and metadata
+    """
+    import json
+    
+    user_id = current_user
+    
+    # Parse uploaded files list
+    try:
+        files_list = json.loads(uploaded_files) if uploaded_files else []
+    except:
+        files_list = [uploaded_files] if uploaded_files else []
+    
+    # Build previous result if provided
+    previous_result = None
+    if previous_command:
+        from dataclasses import dataclass
+        from .ai_agent import ResponseFormat
+        
+        @dataclass
+        class PrevResponse:
+            linux_command: str
+            input_files: list
+            output_files: list
+            description: str
+        
+        try:
+            prev_input = json.loads(previous_input_files) if previous_input_files else []
+            prev_output = json.loads(previous_output_files) if previous_output_files else []
+        except:
+            prev_input = []
+            prev_output = []
+            
+        previous_result = {
+            'structured_response': PrevResponse(
+                linux_command=previous_command,
+                input_files=prev_input,
+                output_files=prev_output,
+                description=previous_description or ""
+            )
+        }
+    
+    # Process with AI agent
+    try:
+        agent = get_agent()
+        ai_response = agent.process_request(
+            user_prompt=prompt,
+            uploaded_files=files_list,
+            user_id=user_id,
+            previous_result=previous_result
+        )
+        
+        # Extract structured response
+        structured_resp = ai_response.get('structured_response')
+        ai_result = {
+            "linux_command": structured_resp.linux_command if structured_resp else None,
+            "input_files": structured_resp.input_files if structured_resp else [],
+            "output_files": structured_resp.output_files if structured_resp else [],
+            "description": structured_resp.description if structured_resp else None,
+        }
+        
+        return {"status": "ok", "ai_response": ai_result}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI processing error: {str(e)}")
