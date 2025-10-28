@@ -191,6 +191,51 @@ def register_generated_files(user_dir: Path, new_file_names: List[str], user_id:
     
     return registered_files
 
+def map_files_to_stored_names(user_dir: Path, file_identifiers: List[str]) -> List[str]:
+    """
+    Map file identifiers to actual stored filenames.
+    file_identifiers can be either:
+    - File IDs (UUIDs)
+    - Stored filenames (UUID.ext)
+    - Original filenames (fallback, tries extension matching)
+    """
+    files_list = []
+    
+    for identifier in file_identifiers:
+        stored_filename = None
+        
+        # Check if it's already a stored filename (contains UUID pattern)
+        if len(identifier.split('.')[0]) == 36:  # UUID length
+            stored_filename = identifier
+        else:
+            # Try to find by file ID (if just UUID provided)
+            try:
+                # Check if it's a UUID
+                if len(identifier) == 36 and '-' in identifier:
+                    # Look for files starting with this UUID
+                    for f in user_dir.iterdir():
+                        if f.is_file() and f.name.startswith(identifier):
+                            stored_filename = f.name
+                            break
+            except:
+                pass
+            
+            # Fallback: extension matching (original problematic logic)
+            if not stored_filename:
+                original_ext = Path(identifier).suffix.lower()
+                matching_files = [f for f in user_dir.iterdir() 
+                                if f.is_file() and f.suffix.lower() == original_ext]
+                if matching_files:
+                    stored_filename = matching_files[0].name
+        
+        if stored_filename and (user_dir / stored_filename).exists():
+            files_list.append(stored_filename)
+        else:
+            # Log warning and skip
+            print(f"Warning: Could not map file identifier '{identifier}' to stored file")
+    
+    return files_list
+
 @app.post("/api/upload")
 async def upload_file(
     files: List[UploadFile] = File(...),
@@ -421,27 +466,9 @@ async def process_prompt(
     except:
         original_files_list = [uploaded_files] if uploaded_files else []
     
-    # Map original filenames to actual stored UUID filenames
+    # Map file identifiers to actual stored UUID filenames using improved logic
     user_dir = user_folder(user_id)
-    files_list = []
-    
-    for original_filename in original_files_list:
-        # Find the actual stored file by checking all files in user directory
-        # and matching the extension
-        original_ext = Path(original_filename).suffix.lower()
-        
-        # Look for files with matching extension in user directory
-        matching_files = [f for f in user_dir.iterdir() 
-                         if f.is_file() and f.suffix.lower() == original_ext]
-        
-        if matching_files:
-            # For simplicity, use the first matching file
-            # In production, you'd want a proper filename mapping system
-            stored_filename = matching_files[0].name
-            files_list.append(stored_filename)
-        else:
-            # If no matching file found, use original (might fail but good for debugging)
-            files_list.append(original_filename)
+    files_list = map_files_to_stored_names(user_dir, original_files_list)
     
     # Build previous result if provided
     previous_result = None
