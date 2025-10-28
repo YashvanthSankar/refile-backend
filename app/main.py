@@ -36,15 +36,13 @@ def user_folder(user_id: str) -> Path:
 
 @app.post("/api/upload")
 async def upload_file(
-    prompt: str = Form(...),
     files: List[UploadFile] = File(...),
     current_user: str = Depends(get_current_user)
 ):
-    """Upload one or more files and save prompt in Supabase.
+    """Upload one or more files without processing.
 
-    Saves uploaded files to user-specific folder, processes with AI agent,
-    and records everything in Supabase.
-    Returns a JSON object with metadata and AI-generated command.
+    Saves uploaded files to user-specific folder and returns file metadata.
+    Use /api/process endpoint to generate AI commands for these files.
     
     Security: Only authenticated users can upload files to their own folder.
     """
@@ -75,60 +73,11 @@ async def upload_file(
         
         original_filenames.append(file.filename)
 
-    # Process with AI agent
-    try:
-        agent = get_agent()
-        ai_response = agent.process_request(
-            user_prompt=prompt,
-            uploaded_files=original_filenames,
-            user_id=user_id,
-            previous_result=None
-        )
-        
-        # Extract structured response
-        structured_resp = ai_response.get('structured_response')
-        ai_result = {
-            "linux_command": structured_resp.linux_command if structured_resp else None,
-            "input_files": structured_resp.input_files if structured_resp else [],
-            "output_files": structured_resp.output_files if structured_resp else [],
-            "description": structured_resp.description if structured_resp else None,
-        }
-    except Exception as e:
-        # If AI processing fails, continue without it
-        print(f"AI processing error: {e}")
-        ai_result = {
-            "linux_command": None,
-            "input_files": [],
-            "output_files": [],
-            "description": f"AI processing failed: {str(e)}",
-        }
-
-    # create DB record with AI response (store all filenames and AI results)
-    record = {
-        "user_id": user_id,
-        "prompt": prompt,
-        "original_filename": ", ".join(original_filenames),  # Store all filenames
-        "stored_filename": ", ".join([f["stored_filename"] for f in uploaded_files_info]),
-        "content_type": ", ".join([f["content_type"] for f in uploaded_files_info]),
-        "ai_response": ai_result.get("description"),
-        "ai_command": ai_result.get("linux_command"),
-        "ai_processing_status": "completed",
-        "processed_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-    try:
-        db_res = sb.insert_prompt(record)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"db error: {e}")
-
     return {
         "status": "ok", 
-        "id": db_res.get("id") if db_res else None,
         "files": uploaded_files_info,
         "file_count": len(uploaded_files_info),
-        "prompt_record": db_res, 
-        "ai_response": ai_result
+        "message": "Files uploaded successfully. Use /api/process to generate commands."
     }
 
 
@@ -182,6 +131,56 @@ def download_file(
     if not path.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(path, filename=safe_filename)
+
+
+@app.delete("/api/delete/{user_id}/{file_id}")
+def delete_file(
+    user_id: str,
+    file_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Delete a file by its ID.
+    
+    Removes the file from the user's upload folder.
+    The file_id should be the UUID part of the stored_filename (without extension).
+    
+    Security: Users can only delete their own files.
+    """
+    # Verify user can only access their own files
+    verify_user_access(current_user, user_id)
+    
+    # Get user folder
+    user_dir = user_folder(user_id)
+    
+    # Find files matching the file_id pattern
+    deleted_files = []
+    file_found = False
+    
+    try:
+        # List all files in user directory
+        for file_path in user_dir.iterdir():
+            if file_path.is_file():
+                # Check if filename starts with the file_id
+                if file_path.stem == file_id or file_path.name.startswith(f"{file_id}."):
+                    # Delete the file
+                    file_path.unlink()
+                    deleted_files.append(file_path.name)
+                    file_found = True
+        
+        if not file_found:
+            raise HTTPException(status_code=404, detail=f"File with ID '{file_id}' not found")
+        
+        return {
+            "status": "ok",
+            "message": f"File(s) deleted successfully",
+            "deleted_files": deleted_files,
+            "file_id": file_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
 
 
 @app.get("/api/health")
