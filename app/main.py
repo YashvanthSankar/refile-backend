@@ -60,10 +60,12 @@ def get_user_id():
 def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: List[str]) -> List[str]:
     """
     Execute a Linux command in a Docker container with user directory mounted.
+    If multiple commands are detected (separated by && or newlines), they will be
+    executed sequentially one after the other.
     
     Args:
         user_dir: Path to user's upload directory
-        linux_command: The command to execute
+        linux_command: The command to execute (may contain multiple commands)
         input_files: List of input filenames
         
     Returns:
@@ -89,18 +91,40 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
     
     user_id = get_user_id()
     
+    # Detect and split multiple commands
+    # Commands can be separated by && or by newlines
+    commands = []
+    
+    # First, split by newlines and clean up
+    lines = [line.strip() for line in linux_command.split('\n') if line.strip()]
+    
+    # Then, split each line by && if present
+    for line in lines:
+        if '&&' in line:
+            # Split by && and add each part
+            parts = [part.strip() for part in line.split('&&') if part.strip()]
+            commands.extend(parts)
+        else:
+            commands.append(line)
+    
+    # If we ended up with just one command, keep it simple
+    if len(commands) == 1:
+        commands = [linux_command.strip()]
+    
     try:
-        # Run the container
-        container_logs = client.containers.run(
-            DOCKER_IMAGE_NAME,
-            command=linux_command,
-            remove=True,
-            volumes=volumes_dict,
-            user=user_id,
-            stdout=True,
-            stderr=True,
-            working_dir=CONTAINER_MOUNT_PATH
-        )
+        # Execute commands sequentially
+        for cmd in commands:
+            # Run each command in the container
+            container_logs = client.containers.run(
+                DOCKER_IMAGE_NAME,
+                command=cmd,
+                remove=True,
+                volumes=volumes_dict,
+                user=user_id,
+                stdout=True,
+                stderr=True,
+                working_dir=CONTAINER_MOUNT_PATH
+            )
         
         # Get list of files after execution
         files_after = set()
@@ -367,6 +391,7 @@ async def process_prompt(
     prompt: str = Form(...),
     uploaded_files: str = Form(...),  # JSON string of filenames
     previous_command: str = Form(None),
+    previous_command_template: str = Form(None),
     previous_input_files: str = Form(None),
     previous_output_files: str = Form(None),
     previous_description: str = Form(None),
@@ -427,6 +452,7 @@ async def process_prompt(
         @dataclass
         class PrevResponse:
             linux_command: str
+            command_template: str
             input_files: list
             output_files: list
             description: str
@@ -441,6 +467,7 @@ async def process_prompt(
         previous_result = {
             'structured_response': PrevResponse(
                 linux_command=previous_command,
+                command_template=previous_command_template or previous_command,
                 input_files=prev_input,
                 output_files=prev_output,
                 description=previous_description or ""
@@ -461,6 +488,7 @@ async def process_prompt(
         structured_resp = ai_response.get('structured_response')
         ai_result = {
             "linux_command": structured_resp.linux_command if structured_resp else None,
+            "command_template": structured_resp.command_template if structured_resp else None,
             "input_files": structured_resp.input_files if structured_resp else [],
             "output_files": structured_resp.output_files if structured_resp else [],
             "description": structured_resp.description if structured_resp else None,

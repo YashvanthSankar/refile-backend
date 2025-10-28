@@ -17,6 +17,7 @@ from .config import settings
 class ResponseFormat:
     """Response schema for the agent."""
     linux_command: str
+    command_template: str
     input_files: List[str]
     output_files: List[str]
     description: str
@@ -139,13 +140,20 @@ IMPORTANT: Always call list_uploaded_files first to see what files are available
 ## Output Format
 
 You MUST return a structured response with exactly these fields:
-- **linux_command**: The exact command to execute (single string, ready to copy-paste)
+- **linux_command**: The exact command to execute with actual filenames (single string, ready to copy-paste)
+- **command_template**: The same command but with template variables instead of actual filenames. Use these template variables:
+  * {input_file} - For input filename with extension
+  * {input_basename} - For filename without extension (e.g., "photo" from "photo.jpg")
+  * {input_ext} - For file extension with dot (e.g., ".jpg", ".png", ".mp4")
+  * {timestamp} - For current timestamp in format YYYYMMDD_HHMMSS
+  * {output_file} - For output filename
 - **input_files**: List of input file paths used in the command (as list of strings)
 - **output_files**: List of output file paths that will be created (as list of strings)
 - **description**: Brief 1-2 sentence explanation of what the command does
 
 Example:
 linux_command: "ffmpeg -i ./uploads/video.mp4 -vn -acodec libmp3lame ./uploads/audio.mp3"
+command_template: "ffmpeg -i {input_file} -vn -acodec libmp3lame {output_file}"
 input_files: ["./uploads/video.mp4"]
 output_files: ["./uploads/audio.mp3"]
 description: "Extracts the audio track from video.mp4 and saves it as an MP3 file using the LAME encoder."
@@ -212,13 +220,14 @@ Prompt: {user_prompt}
 Uploaded Files: {uploaded_files}
 
 Please analyze this request and generate a Linux command for the media processing task. Return your response as JSON with these exact fields:
-- linux_command: The complete command to execute
+- linux_command: The complete command to execute with actual filenames
+- command_template: The same command but with template variables: {{input_file}}, {{input_basename}}, {{input_ext}}, {{timestamp}}, {{output_file}}
 - input_files: List of input file names
 - output_files: List of output file names that will be created
 - description: Brief explanation of what the command does
 
 Example response:
-{{"linux_command": "ffmpeg -i video.mp4 -vn -acodec libmp3lame audio.mp3", "input_files": ["video.mp4"], "output_files": ["audio.mp3"], "description": "Extracts audio from video as MP3"}}
+{{"linux_command": "ffmpeg -i video.mp4 -vn -acodec libmp3lame audio.mp3", "command_template": "ffmpeg -i {{input_file}} -vn -acodec libmp3lame {{output_file}}", "input_files": ["video.mp4"], "output_files": ["audio.mp3"], "description": "Extracts audio from video as MP3"}}
 """
         
         # Build messages list
@@ -250,6 +259,7 @@ Example response:
                     # Create ResponseFormat object
                     structured_response = ResponseFormat(
                         linux_command=parsed.get('linux_command', ''),
+                        command_template=parsed.get('command_template', parsed.get('linux_command', '')),
                         input_files=parsed.get('input_files', []),
                         output_files=parsed.get('output_files', []),
                         description=parsed.get('description', '')
@@ -258,6 +268,7 @@ Example response:
                     # Fallback if no JSON found
                     structured_response = ResponseFormat(
                         linux_command=response_text,
+                        command_template=response_text,
                         input_files=uploaded_files,
                         output_files=[],
                         description="Command generated from AI response"
@@ -266,6 +277,7 @@ Example response:
                 # Fallback parsing failed
                 structured_response = ResponseFormat(
                     linux_command=response_text,
+                    command_template=response_text,
                     input_files=uploaded_files,
                     output_files=[],
                     description="Command generated from AI response (parsing failed)"
@@ -286,6 +298,7 @@ Example response:
             return {
                 "structured_response": ResponseFormat(
                     linux_command="",
+                    command_template="",
                     input_files=[],
                     output_files=[],
                     description=f"Error: {str(e)}"
