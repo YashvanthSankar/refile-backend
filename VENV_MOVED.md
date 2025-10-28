@@ -66,7 +66,7 @@ refile/
     │   ├── db.py
     │   └── security.py
     ├── migrations/          ← Database migrations
-    ├── user-uploads/        ← Uploaded files
+    ├── user_uploads/        ← Uploaded files
     ├── requirements.txt     ← Dependencies
     ├── .env                 ← Environment variables
     ├── .gitignore          ← Git ignore (includes .venv)

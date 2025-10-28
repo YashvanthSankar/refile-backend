@@ -13,7 +13,7 @@ ENV/
 .env
 
 # Uploads
-user-uploads/
+user_uploads/
 *.tmp
 
 # IDEs

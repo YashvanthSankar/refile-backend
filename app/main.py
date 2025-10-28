@@ -4,7 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from uuid import uuid4
 import os
+import platform
+import sys
 from pathlib import Path
+import docker
+import json
+import mimetypes
 from .config import settings
 from .db import SupabaseClient
 from .security import get_current_user, verify_user_access, sanitize_filename
@@ -33,6 +38,134 @@ def user_folder(user_id: str) -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+# Docker configuration
+DOCKER_IMAGE_NAME = "my-base-image-clis"  # Configure this in your environment
+CONTAINER_MOUNT_PATH = "/data"
+
+def get_docker_client():
+    """Connects to the Docker daemon."""
+    try:
+        client = docker.from_env()
+        client.ping()
+        return client
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not connect to Docker daemon: {str(e)}")
+
+def get_user_id():
+    """Gets the user:group ID to fix file permissions. Not supported on Windows."""
+    if platform.system() == "Windows":
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
+
+def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: List[str]) -> List[str]:
+    """
+    Execute a Linux command in a Docker container with user directory mounted.
+    
+    Args:
+        user_dir: Path to user's upload directory
+        linux_command: The command to execute
+        input_files: List of input filenames
+        
+    Returns:
+        List of newly created output files
+    """
+    client = get_docker_client()
+    
+    # Get list of files before execution
+    files_before = set()
+    if user_dir.exists():
+        files_before = {f.name for f in user_dir.iterdir() if f.is_file()}
+    
+    # Convert to absolute path and resolve any symlinks
+    user_dir_absolute = user_dir.resolve()
+    
+    # Prepare container run arguments with absolute host path
+    volumes_dict = {
+        str(user_dir_absolute): {
+            'bind': CONTAINER_MOUNT_PATH,
+            'mode': 'rw'
+        }
+    }
+    
+    user_id = get_user_id()
+    
+    try:
+        # Run the container
+        container_logs = client.containers.run(
+            DOCKER_IMAGE_NAME,
+            command=linux_command,
+            remove=True,
+            volumes=volumes_dict,
+            user=user_id,
+            stdout=True,
+            stderr=True,
+            working_dir=CONTAINER_MOUNT_PATH
+        )
+        
+        # Get list of files after execution
+        files_after = set()
+        if user_dir.exists():
+            files_after = {f.name for f in user_dir.iterdir() if f.is_file()}
+        
+        # Find newly created files
+        new_files = list(files_after - files_before)
+        
+        return new_files
+        
+    except docker.errors.ContainerError as e:
+        error_msg = e.stderr.decode('utf-8').strip() if e.stderr else "Command failed"
+        raise HTTPException(status_code=400, detail=f"Docker command failed: {error_msg}")
+    except docker.errors.ImageNotFound:
+        raise HTTPException(status_code=500, detail=f"Docker image '{DOCKER_IMAGE_NAME}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Docker execution error: {str(e)}")
+
+def register_generated_files(user_dir: Path, new_file_names: List[str], user_id: str) -> List[dict]:
+    """
+    Register newly generated files using the same logic as /api/upload
+    
+    Args:
+        user_dir: Path to user's upload directory
+        new_file_names: List of newly created filenames
+        user_id: User ID
+        
+    Returns:
+        List of file metadata with UUIDs
+    """
+    registered_files = []
+    
+    for filename in new_file_names:
+        file_path = user_dir / filename
+        
+        if file_path.exists():
+            # Generate UUID and new filename like upload route
+            ext = file_path.suffix
+            file_id = str(uuid4())
+            new_filename = f"{file_id}{ext}"
+            dest = user_dir / new_filename
+            
+            # Rename file to UUID format
+            file_path.rename(dest)
+            
+            # Get content type
+            content_type, _ = mimetypes.guess_type(str(dest))
+            if not content_type:
+                content_type = "application/octet-stream"
+            
+            # Create file metadata with correct path format
+            relative_path = f"user_uploads/{user_id}/{new_filename}"
+            
+            file_info = {
+                "id": file_id,
+                "original_filename": filename,
+                "stored_filename": new_filename,
+                "content_type": content_type,
+                "path": relative_path,
+            }
+            
+            registered_files.append(file_info)
+    
+    return registered_files
 
 @app.post("/api/upload")
 async def upload_file(
@@ -63,12 +196,15 @@ async def upload_file(
             content = await file.read()
             f.write(content)
         
+        # Create correct relative path
+        relative_path = f"user_uploads/{user_id}/{filename}"
+        
         uploaded_files_info.append({
             "id": file_id,
             "original_filename": file.filename,
             "stored_filename": filename,
             "content_type": file.content_type,
-            "path": str(dest),
+            "path": relative_path,
         })
         
         original_filenames.append(file.filename)
@@ -307,6 +443,16 @@ async def process_prompt(
             "output_files": structured_resp.output_files if structured_resp else [],
             "description": structured_resp.description if structured_resp else None,
         }
+        
+        # Execute the command in Docker
+        if ai_result["linux_command"]:
+            user_dir = user_folder(user_id)
+            new_files = execute_command_in_docker(user_dir, ai_result["linux_command"], ai_result["input_files"])
+            
+            # Register new files
+            new_files_metadata = register_generated_files(user_dir, new_files, user_id)
+            
+            ai_result["output_files"] = new_files_metadata
         
         return {"status": "ok", "ai_response": ai_result}
         

@@ -28,7 +28,7 @@ echo "📥 Installing dependencies..."
 pip install -r requirements.txt
 
 # Create upload directory
-mkdir -p user-uploads
+mkdir -p user_uploads
 
 echo ""
 echo "✅ Setup complete!"
