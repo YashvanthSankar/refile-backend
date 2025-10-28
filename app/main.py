@@ -103,13 +103,17 @@ async def upload_file(
             "description": f"AI processing failed: {str(e)}",
         }
 
-    # create DB record with AI response (store all filenames)
+    # create DB record with AI response (store all filenames and AI results)
     record = {
         "user_id": user_id,
         "prompt": prompt,
         "original_filename": ", ".join(original_filenames),  # Store all filenames
         "stored_filename": ", ".join([f["stored_filename"] for f in uploaded_files_info]),
         "content_type": ", ".join([f["content_type"] for f in uploaded_files_info]),
+        "ai_response": ai_result.get("description"),
+        "ai_command": ai_result.get("linux_command"),
+        "ai_processing_status": "completed",
+        "processed_at": datetime.utcnow().isoformat(),
         "created_at": datetime.utcnow().isoformat(),
     }
 
@@ -120,6 +124,7 @@ async def upload_file(
 
     return {
         "status": "ok", 
+        "id": db_res.get("id") if db_res else None,
         "files": uploaded_files_info,
         "file_count": len(uploaded_files_info),
         "prompt_record": db_res, 
@@ -182,6 +187,44 @@ def download_file(
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/status/{prompt_id}")
+def get_prompt_status(
+    prompt_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Get the processing status of a prompt/file upload.
+    
+    Returns the current AI processing status, response, and any error messages.
+    Users can only check status of their own prompts.
+    """
+    try:
+        record = sb.get_prompt_by_id(prompt_id)
+        
+        if not record:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        
+        # Verify user owns this prompt
+        verify_user_access(current_user, record["user_id"])
+        
+        return {
+            "status": "ok",
+            "id": str(record["id"]),
+            "user_id": record["user_id"],
+            "prompt": record["prompt"],
+            "original_filename": record["original_filename"],
+            "ai_processing_status": record.get("ai_processing_status", "pending"),
+            "ai_response": record.get("ai_response"),
+            "ai_command": record.get("ai_command"),
+            "error_message": record.get("error_message"),
+            "processed_at": record.get("processed_at"),
+            "created_at": record["created_at"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting status: {str(e)}")
 
 
 @app.post("/api/process")
