@@ -152,10 +152,10 @@ You MUST return a structured response with exactly these fields:
 - **description**: Brief 1-2 sentence explanation of what the command does
 
 Example:
-linux_command: "ffmpeg -i ./uploads/video.mp4 -vn -acodec libmp3lame ./uploads/audio.mp3"
+linux_command: "ffmpeg -i ./user_uploads/video.mp4 -vn -acodec libmp3lame ./user_uploads/audio.mp3"
 command_template: "ffmpeg -i {input_file} -vn -acodec libmp3lame {output_file}"
-input_files: ["./uploads/video.mp4"]
-output_files: ["./uploads/audio.mp3"]
+input_files: ["./user_uploads/video.mp4"]
+output_files: ["./user_uploads/audio.mp3"]
 description: "Extracts the audio track from video.mp4 and saves it as an MP3 file using the LAME encoder."
 
 Remember: Be clear, precise, and helpful. Your goal is to make command-line media processing accessible to users unfamiliar with these tools.
