@@ -91,6 +91,12 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
     
     user_id = get_user_id()
     
+    # Set up environment variables for LibreOffice and other tools
+    environment = {
+        'HOME': '/tmp',  # Use /tmp as home directory
+        'SAL_USE_VCLPLUGIN': 'svp',  # Use headless backend for LibreOffice
+    }
+    
     # Detect and split multiple commands
     # Commands can be separated by && or by newlines
     commands = []
@@ -114,6 +120,18 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
     try:
         # Execute commands sequentially
         for cmd in commands:
+            # Add LibreOffice-specific options if the command contains libreoffice or soffice
+            if 'libreoffice' in cmd.lower() or 'soffice' in cmd.lower():
+                # Ensure the command uses proper LibreOffice headless options
+                if '--headless' not in cmd and '-headless' not in cmd:
+                    cmd = cmd.replace('libreoffice', 'libreoffice --headless', 1)
+                    cmd = cmd.replace('soffice', 'soffice --headless', 1)
+                
+                # Add user profile directory option
+                if '-env:UserInstallation' not in cmd:
+                    # Use a temporary user profile in /tmp
+                    cmd = cmd.replace('--headless', '--headless -env:UserInstallation=file:///tmp/libreoffice_profile', 1)
+            
             # Run each command in the container
             container_logs = client.containers.run(
                 DOCKER_IMAGE_NAME,
@@ -121,6 +139,7 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
                 remove=True,
                 volumes=volumes_dict,
                 user=user_id,
+                environment=environment,
                 stdout=True,
                 stderr=True,
                 working_dir=CONTAINER_MOUNT_PATH
