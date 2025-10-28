@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
 from uuid import uuid4
 import os
 from pathlib import Path
@@ -36,12 +37,12 @@ def user_folder(user_id: str) -> Path:
 @app.post("/api/upload")
 async def upload_file(
     prompt: str = Form(...),
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     current_user: str = Depends(get_current_user)
 ):
-    """Upload a file and save prompt in Supabase.
+    """Upload one or more files and save prompt in Supabase.
 
-    Saves uploaded file to user-specific folder, processes with AI agent,
+    Saves uploaded files to user-specific folder, processes with AI agent,
     and records everything in Supabase.
     Returns a JSON object with metadata and AI-generated command.
     
@@ -49,22 +50,37 @@ async def upload_file(
     """
     user_id = current_user  # Use authenticated user, not client-provided
     
-    # save file
-    ext = Path(file.filename).suffix
-    file_id = str(uuid4())
-    filename = f"{file_id}{ext}"
-    dest = user_folder(user_id) / filename
+    # Save all files
+    uploaded_files_info = []
+    original_filenames = []
+    
+    for file in files:
+        # save file
+        ext = Path(file.filename).suffix
+        file_id = str(uuid4())
+        filename = f"{file_id}{ext}"
+        dest = user_folder(user_id) / filename
 
-    with open(dest, "wb") as f:
-        content = await file.read()
-        f.write(content)
+        with open(dest, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        uploaded_files_info.append({
+            "id": file_id,
+            "original_filename": file.filename,
+            "stored_filename": filename,
+            "content_type": file.content_type,
+            "path": str(dest),
+        })
+        
+        original_filenames.append(file.filename)
 
     # Process with AI agent
     try:
         agent = get_agent()
         ai_response = agent.process_request(
             user_prompt=prompt,
-            uploaded_files=[file.filename],
+            uploaded_files=original_filenames,
             user_id=user_id,
             previous_result=None
         )
@@ -87,13 +103,13 @@ async def upload_file(
             "description": f"AI processing failed: {str(e)}",
         }
 
-    # create DB record with AI response
+    # create DB record with AI response (store all filenames)
     record = {
         "user_id": user_id,
         "prompt": prompt,
-        "original_filename": file.filename,
-        "stored_filename": filename,
-        "content_type": file.content_type,
+        "original_filename": ", ".join(original_filenames),  # Store all filenames
+        "stored_filename": ", ".join([f["stored_filename"] for f in uploaded_files_info]),
+        "content_type": ", ".join([f["content_type"] for f in uploaded_files_info]),
         "created_at": datetime.utcnow().isoformat(),
     }
 
@@ -102,13 +118,13 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
-    return {"status": "ok", "file": {
-        "id": file_id,
-        "original_filename": file.filename,
-        "stored_filename": filename,
-        "content_type": file.content_type,
-        "path": str(dest),
-    }, "prompt_record": db_res, "ai_response": ai_result}
+    return {
+        "status": "ok", 
+        "files": uploaded_files_info,
+        "file_count": len(uploaded_files_info),
+        "prompt_record": db_res, 
+        "ai_response": ai_result
+    }
 
 
 @app.get("/api/list/{user_id}")
