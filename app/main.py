@@ -460,15 +460,22 @@ async def process_prompt(
     
     user_id = current_user
     
-    # Parse uploaded files list
+    # Parse uploaded files list - now contains UUIDs/stored filenames
     try:
-        original_files_list = json.loads(uploaded_files) if uploaded_files else []
+        files_list = json.loads(uploaded_files) if uploaded_files else []
     except:
-        original_files_list = [uploaded_files] if uploaded_files else []
+        files_list = [uploaded_files] if uploaded_files else []
     
-    # Map file identifiers to actual stored UUID filenames using improved logic
+    # Validate that the files exist in user's directory
     user_dir = user_folder(user_id)
-    files_list = map_files_to_stored_names(user_dir, original_files_list)
+    validated_files = []
+    for filename in files_list:
+        if (user_dir / filename).exists():
+            validated_files.append(filename)
+        else:
+            print(f"Warning: File '{filename}' not found in user directory")
+    
+    files_list = validated_files
     
     # Build previous result if provided
     previous_result = None
