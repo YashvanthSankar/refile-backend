@@ -1,7 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, Query, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Optional
 from uuid import uuid4
 import os
 import platform
@@ -552,3 +552,255 @@ async def list_user_files(
             })
     
     return {"files": files}
+
+def render_preset_command(
+    command_template: str,
+    input_mappings: dict,
+    output_patterns: List[dict]
+) -> tuple[str, List[str]]:
+    """
+    Render a preset command template with actual file names.
+    
+    Args:
+        command_template: Template string like "convert {input_file} -colorspace Gray {output_file}"
+        input_mappings: Dict mapping variable names to actual filenames, e.g., {"input_file": "photo.jpg"}
+        output_patterns: List of output file patterns from preset
+        
+    Returns:
+        Tuple of (rendered_command, list_of_output_filenames)
+    """
+    rendered_command = command_template
+    output_files = []
+    
+    # Replace input variables
+    for var_name, actual_filename in input_mappings.items():
+        rendered_command = rendered_command.replace(f"{{{var_name}}}", actual_filename)
+    
+    # Generate output filenames from patterns
+    for output_pattern in output_patterns:
+        pattern_template = output_pattern.get("template", "")
+        
+        # Replace special variables in output pattern
+        output_filename = pattern_template
+        
+        # Get first input file for basename/extension extraction
+        first_input = list(input_mappings.values())[0] if input_mappings else "output"
+        input_path = Path(first_input)
+        
+        # Replace template variables
+        output_filename = output_filename.replace("{input_basename}", input_path.stem)
+        output_filename = output_filename.replace("{input_ext}", input_path.suffix)
+        output_filename = output_filename.replace("{timestamp}", datetime.now().strftime("%Y%m%d_%H%M%S"))
+        
+        output_files.append(output_filename)
+        
+        # Replace in command
+        var_name = output_pattern.get("name", "output_file")
+        rendered_command = rendered_command.replace(f"{{{var_name}}}", output_filename)
+    
+    return rendered_command, output_files
+
+
+# ============= PRESET ROUTES =============
+
+@app.post("/api/presets")
+async def create_preset(
+    name: str = Form(...),
+    description: str = Form(...),
+    category: str = Form(...),
+    command_template: str = Form(...),
+    input_file_patterns: str = Form(...),  # JSON string
+    output_file_patterns: str = Form(...),  # JSON string
+    tags: str = Form("[]"),  # JSON array string
+    tool: str = Form(...),
+    is_public: bool = Form(True),
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Create a new community preset.
+    
+    Example input_file_patterns:
+    [{"name": "input_file", "extensions": [".png", ".jpg"], "description": "Image to convert"}]
+    
+    Example output_file_patterns:
+    [{"name": "output_file", "template": "{input_basename}_grayscale{input_ext}", "description": "Grayscale image"}]
+    """
+    try:
+        input_patterns = json.loads(input_file_patterns)
+        output_patterns = json.loads(output_file_patterns)
+        tags_list = json.loads(tags)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON in patterns or tags")
+    
+    preset_data = {
+        "user_id": current_user,
+        "name": name,
+        "description": description,
+        "category": category,
+        "command_template": command_template,
+        "input_file_patterns": json.dumps(input_patterns),
+        "output_file_patterns": json.dumps(output_patterns),
+        "tags": tags_list,
+        "tool": tool,
+        "is_public": is_public,
+    }
+    
+    try:
+        result = sb.create_preset(preset_data)
+        return {"status": "ok", "preset": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create preset: {str(e)}")
+
+
+@app.get("/api/presets")
+def list_presets(
+    category: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    limit: int = Query(50, le=100),
+    offset: int = Query(0),
+    current_user: str = Depends(get_current_user)
+):
+    """
+    List community presets with optional filtering.
+    
+    Filters:
+    - category: Filter by category (image, video, audio, pdf)
+    - tag: Filter by tag
+    - search: Search in name and description
+    - user_id: Filter by creator (to see your own presets)
+    """
+    try:
+        presets = sb.list_presets(
+            category=category,
+            tag=tag,
+            search=search,
+            user_id=user_id,
+            limit=limit,
+            offset=offset
+        )
+        return {"status": "ok", "presets": presets, "count": len(presets)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list presets: {str(e)}")
+
+
+@app.get("/api/presets/{preset_id}")
+def get_preset(
+    preset_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Get detailed information about a specific preset."""
+    try:
+        preset = sb.get_preset_by_id(preset_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        
+        # Check if user has liked this preset
+        has_liked = sb.has_user_liked_preset(preset_id, current_user)
+        preset["has_liked"] = has_liked
+        
+        return {"status": "ok", "preset": preset}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get preset: {str(e)}")
+
+
+@app.post("/api/presets/{preset_id}/like")
+async def like_preset(
+    preset_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Like/unlike a preset (toggle)."""
+    try:
+        result = sb.toggle_preset_like(preset_id, current_user)
+        return {"status": "ok", "liked": result["liked"], "likes_count": result["likes_count"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to like preset: {str(e)}")
+
+
+@app.delete("/api/presets/{preset_id}")
+async def delete_preset(
+    preset_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """Delete a preset (only creator can delete)."""
+    try:
+        preset = sb.get_preset_by_id(preset_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        
+        # Verify ownership
+        if preset["user_id"] != current_user:
+            raise HTTPException(status_code=403, detail="You can only delete your own presets")
+        
+        sb.delete_preset(preset_id)
+        return {"status": "ok", "message": "Preset deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete preset: {str(e)}")
+
+
+@app.post("/api/presets/{preset_id}/execute")
+async def execute_preset(
+    preset_id: str,
+    file_mappings: str = Form(...),  # JSON: {"input_file": "actual_filename.jpg"}
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Execute a preset with user's files.
+    
+    Args:
+        preset_id: UUID of the preset to execute
+        file_mappings: JSON mapping of variable names to actual filenames
+                      e.g., {"input_file": "a6ba841e-d302-40ca-9183-4d4c117b559a.png"}
+    """
+    try:
+        # Get preset
+        preset = sb.get_preset_by_id(preset_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        
+        # Parse file mappings
+        try:
+            mappings = json.loads(file_mappings)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid file_mappings JSON")
+        
+        # Parse preset patterns
+        output_patterns = json.loads(preset["output_file_patterns"])
+        
+        # Render command
+        rendered_command, expected_outputs = render_preset_command(
+            preset["command_template"],
+            mappings,
+            output_patterns
+        )
+        
+        # Execute in Docker
+        user_dir = user_folder(current_user)
+        new_files = execute_command_in_docker(
+            user_dir, 
+            rendered_command, 
+            list(mappings.values())
+        )
+        
+        # Register new files
+        new_files_metadata = register_generated_files(user_dir, new_files, current_user)
+        
+        # Increment usage count
+        sb.increment_preset_usage(preset_id)
+        
+        return {
+            "status": "ok",
+            "preset_name": preset["name"],
+            "command_executed": rendered_command,
+            "output_files": new_files_metadata
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to execute preset: {str(e)}")

@@ -63,3 +63,59 @@ class SupabaseClient:
             raise RuntimeError(res.error or "update failed")
         return res.data[0] if res.data else None
 
+def create_preset(self, preset_data: dict):
+    """Create a new preset"""
+    result = self.client.table('presets').insert(preset_data).execute()
+    return result.data[0] if result.data else None
+
+def list_presets(self, category=None, tag=None, search=None, user_id=None, limit=50, offset=0):
+    """List presets with filters"""
+    query = self.client.table('presets').select('*').eq('is_public', True)
+    
+    if category:
+        query = query.eq('category', category)
+    if tag:
+        query = query.contains('tags', [tag])
+    if search:
+        query = query.or_(f'name.ilike.%{search}%,description.ilike.%{search}%')
+    if user_id:
+        query = query.eq('user_id', user_id)
+    
+    query = query.order('likes_count', desc=True).range(offset, offset + limit - 1)
+    result = query.execute()
+    return result.data
+
+def get_preset_by_id(self, preset_id: str):
+    """Get a specific preset"""
+    result = self.client.table('presets').select('*').eq('id', preset_id).single().execute()
+    return result.data
+
+def has_user_liked_preset(self, preset_id: str, user_id: str):
+    """Check if user has liked a preset"""
+    result = self.client.table('preset_likes').select('id').eq('preset_id', preset_id).eq('user_id', user_id).execute()
+    return len(result.data) > 0
+
+def toggle_preset_like(self, preset_id: str, user_id: str):
+    """Toggle like on a preset"""
+    has_liked = self.has_user_liked_preset(preset_id, user_id)
+    
+    if has_liked:
+        # Unlike
+        self.client.table('preset_likes').delete().eq('preset_id', preset_id).eq('user_id', user_id).execute()
+        self.client.rpc('decrement_preset_likes', {'preset_id': preset_id}).execute()
+        new_count = self.get_preset_by_id(preset_id)['likes_count']
+        return {'liked': False, 'likes_count': new_count}
+    else:
+        # Like
+        self.client.table('preset_likes').insert({'preset_id': preset_id, 'user_id': user_id}).execute()
+        self.client.rpc('increment_preset_likes', {'preset_id': preset_id}).execute()
+        new_count = self.get_preset_by_id(preset_id)['likes_count']
+        return {'liked': True, 'likes_count': new_count}
+
+def increment_preset_usage(self, preset_id: str):
+    """Increment usage count"""
+    self.client.rpc('increment_preset_usage', {'preset_id': preset_id}).execute()
+
+def delete_preset(self, preset_id: str):
+    """Delete a preset"""
+    self.client.table('presets').delete().eq('id', preset_id).execute()
