@@ -11,12 +11,14 @@ class SupabaseClient:
     def insert_prompt(self, record: dict):
         # expects record keys matching table columns
         res = self.client.table(self.table).insert(record).execute()
-        if res.status_code >= 400:
+        # Note: Supabase client may not always have status_code attribute
+        if hasattr(res, 'status_code') and res.status_code >= 400:
             raise RuntimeError(res.error or "insert failed")
         return res.data
 
     def get_prompts_for_user(self, user_id: str):
         res = self.client.table(self.table).select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-        if res.status_code >= 400:
+        # Note: Supabase client may not always have status_code attribute
+        if hasattr(res, 'status_code') and res.status_code >= 400:
             raise RuntimeError(res.error or "select failed")
         return res.data
