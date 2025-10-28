@@ -7,4 +7,6 @@ supabase
 python-multipart
 langchain
 langchain-mistralai
+langchain-groq
 langgraph
+docker

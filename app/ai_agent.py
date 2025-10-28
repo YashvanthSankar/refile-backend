@@ -4,7 +4,7 @@ AI Agent for Media Processing Commands
 This module contains the AI agent that generates Linux commands
 for media processing operations (FFmpeg, ImageMagick, PDFs, etc.)
 """
-from langchain_mistralai import ChatMistralAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from dataclasses import dataclass
 from typing import List, Optional, Dict
@@ -166,22 +166,23 @@ class MediaProcessingAgent:
     """
     AI Agent for generating media processing commands.
     
-    Uses Mistral AI to analyze user prompts and generate
+    Uses Groq AI to analyze user prompts and generate
     appropriate FFmpeg, ImageMagick, or other media processing commands.
     """
     
-    def __init__(self, model_name: str = "mistral-small-latest", temperature: float = 0.8):
+    def __init__(self, model_name: str = "llama-3.3-70b-versatile", temperature: float = 0.8):
         """
         Initialize the agent with a language model.
         
         Args:
-            model_name: Name of the Mistral model to use
+            model_name: Name of the Groq model to use (default: llama-3.3-70b-versatile)
+                       Options: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768, gemma2-9b-it
             temperature: Temperature for response generation (0.0 - 1.0)
         """
-        # Set Mistral API key from config
-        os.environ['MISTRAL_API_KEY'] = settings.MISTRAL_API_KEY
+        # Set Groq API key from config
+        os.environ['GROQ_API_KEY'] = settings.GROQ_API_KEY
         
-        self.model = ChatMistralAI(
+        self.model = ChatGroq(
             model=model_name,
             temperature=temperature,
             timeout=30,
