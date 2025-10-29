@@ -1,0 +1,657 @@
+Greedy Method and
+Dynamic Programming
+Instructor: Dr Om Prakash
+IIITDM Kancheepuram
+
+Greedy Method—Formal Setup
+• An optimization problem
+
+is a tuple:
+
+Where,
+•
+is the set of all instances of the problem
+• For each instance
+,
+is the set of all feasible solutions for
+.
+•
+is the objective function that assigns a value to
+each feasible solution.
+•
+specifies whether the problem is minimization or maximize
+
+Greedy Method—Formal Setup
+• The goal is to find, for a given instance
+
+Such that,
+
+, a feasible solution
+
+Greedy Algorithm
+• A greedy algorithm for an optimization problem
+is an algorithms that
+constructs a solution incrementally as follows:
+1. Start with the empty solution
+.
+2. At each iteration
+given a partial solution , choose an element
+That is feasible to add and maximizes or (minimizes) a local selection
+criterion
+.
+3. Extend the solution:
+4. Continue until a complete feasible solution is obtained.
+The algorithm never revises earlier choices (irrevocability)
+
+Greedy Algorithm– Correctness Condition
+• A greedy algorithm yields an optimal solution if:
+1. Optimal Substructure: An optimal solution to the problem can be
+composed from optimal solution to its subproblems.
+2. Greedy-Choice Property: A global optimum can be obtained by
+choosing a local optimum at each step.
+
+Coin Change Problem
+• A child buys candy valued at less than $1 and gives a $1 bill to the
+cashier.
+
+• The cashier wishes to return change using the fewest number of
+coins.
+• Assume that an unlimited supply of quarters, dimes, nickels, and
+pennies is available.
+
+Coin Change Problem
+• Example: Suppose the worth of candy was 33 cents.
+• The solution to this problem is (2 quarters, 1 dime, 1 nickel and 2
+pennies).
+• Show that the greedy algorithm for the coin-change problem
+generates change with the fewest number of coins when the cashier
+has an unlimited supply of quarters, dimes, nickels, and pennies.
+
+Coin Change Problem
+• Canonical system= {quarter, dime, nickel, penny}
+• Non-canonical system = {1,3,4} check for 6!
+
+• Prove the greedy choice property using contradiction.
+• Let
+be the greedy solution and
+Be the optimal solution.
+
+Coin Change Problem--Correctness
+• Clearly, if the optimal solution is different from the greedy solution
+• Choose the least index
+such that
+• Observation:
+• Construct a new feasible solution
+from
+by incrementing to
+decrementing the added value by removing coins of least
+denominations than coin
+
+Coin Change Problem--Correctness
+• Thus, we obtained a new feasible solution whose number of coins is
+less than the optimal solution.
+• This is a contradiction and hence our assumption was false and the
+greedy solution is in-fact the optimal solution.
+
+Container Loading Problem
+• A large ship is to be loaded with cargo. The cargo is containerized,
+and all containers are the same size.
+• Different containers may have different weights.
+• Let
+be the weight of the
+container
+.
+• The cargo capacity of the ship is .
+• We wish to load the ship with the maximum number of containers.
+
+Container Loading Problem
+• Let
+be a variable whose value can be either 0 or 1. If we set
+to 0, then container is not to be loaded. If
+is 1 then the container is
+to be loaded.
+
+• The optimization function is
+• Every set of
+‘s that satisfy the constraints is a feasible solution.
+• Every feasible solution that maximizes
+is an optimal solution.
+
+Container Loading Problem—Greedy Strategy
+• From the remaining containers, select the one with least weight.
+
+Container Loading Problem
+• Example: Suppose that
+, and
+When the greedy algorithm is used, the containers are considered for
+loading in the order
+and the greedy solution we
+have
+and
+
+Container Loading—Greedy Algorithm
+
+Container Loading—Proof of Correctness
+• Theorem 4.1: The greedy algorithm generates optimal loadings.
+• Proof: Let
+be the solution produced by the
+greedy algorithm and let
+be any feasible
+solution.
+We will show that
+. Without loss of generality we may
+assume that the containers have been ordered so that
+,
+
+• From the way greedy algorithm works
+
+such that
+
+Container Loading—Proof of Correctness
+• The proof is by induction on the number of positions
+.
+• Base Case:
+and so
+and are the same. So,
+
+• Induction Hypothesis: Let
+
+such that
+
+be the arbitrary natural number
+
+Container Loading—Proof of Correctness
+• Induction Step: We show that
+
+• Find the least integer
+
+,
+
+such that
+
+• Since,
+
+such a
+
+• Also,
+
+, as otherwise
+and
+
+.
+
+exists.
+is not a feasible solution. Since,
+. Set
+to 1.
+
+Container Loading—Proof of Correctness
+• If the resulting
+
+is a feasible solution, let
+
+denote the resulting
+
+• If the resulting
+denotes a infeasible solution, there must be
+in the range
+for which
+. Set
+.
+• Let
+denote the resulting . As
+,
+is a feasible
+solution.
+• In either case,
+and
+differs from
+in at most
+positions. From the Induction Hypothesis it follows that
+
+Knapsack Problem
+• Given
+objects and a knapsack or bag.
+• Object has a weight
+and the knapsack has a capacity
+.
+• If a fraction
+of object
+is placed into the knapsack,
+then a profit of
+is earned.
+• The objective is to obtain a filling of the knapsack that maximizes the
+total profit earned.
+
+Knapsack Problem
+
+Knapsack Problem
+Example: Consider the following instance of the knapsack problem:
+,
+and
+. Four feasible solutions are:
+
+Knapsack Problem
+• Lemma: In case the sum of all the weights is
+is an optimal solution.
+
+, then
+
+• Lemma: All optimal solutions will fill the knapsack exactly.
+
+Knapsack Greedy Algorithm
+
+Knapsack Greedy Algorithm--Correctness
+• Theorem: If
+then GreedyKnapsack generates an
+optimal solution to the given instance of the knapsack problem.
+
+• Proof of Correctness: Let
+generated by GreedyKnapsack. If all the
+the solution is optimal.
+• Let
+be the least index such that
+follows that
+
+be the solution
+equal one, then clearly
+. From the algorithm it
+
+and
+
+Knapsack Greedy Algorithm--Correctness
+• Let
+be an optimal solution. From earlier
+Lemma, we can assume that
+
+• Let be the least index such that
+exist. It also follows that
+.
+
+. Clearly, such a
+
+must
+
+Knapsack Greedy Algorithm--Correctness
+• Consider three possiblilities:
+
+• 1. If
+• 2. If
+3. If
+
+, then
+. But,
+, and so
+, then since
+and
+for
+it follows that either
+or
+, then
+, and this is not possible.
+
+Knapsack Greedy Algorithm--Correctness
+• Now suppose we increase
+to
+and decrease as many of
+as necessary so that the total capacity used is still
+
+• This results in a new solution
+and
+
+with
+
+Knapsack Greedy Algorithm--Correctness
+• Then, for
+
+we have,
+
+Knapsack Greedy Algorithm--Correctness
+• If
+then could not have an optimal solution.
+If these sums are equal, then either
+and
+is optimal, or
+
+• In the latter case, repeated use of the above argument will either
+show that
+is not optimal, or transform into
+and thus show
+that too is optimal.
+
+Job Scheduling without Deadline
+• You are given
+tasks and an infinite supply of machines on which those
+tasks can be performed.
+• Each task has a start time
+and a finish time
+is the processing interval for task .
+
+,
+
+,
+
+• Two tasks and
+overlap iff their processing intervals overlap at a
+Point other than the interval start or end.
+
+Job Scheduling without Deadline
+• A feasible task-to-machine assignment is an assignment in which no
+machine is assigned two overlapping tasks.
+
+• An optimal assignment is a feasible assignment that utilizes the
+fewest number of machines.
+
+Job Scheduling without Deadline
+task
+
+a
+
+b
+
+c
+
+d
+
+e
+
+f
+
+g
+
+start
+
+0
+
+3
+
+4
+
+9
+
+7
+
+1
+
+6
+
+finish
+
+2
+
+7
+
+7
+
+11
+
+10
+
+5
+
+8
+d
+
+c
+M3
+
+g
+
+f
+M2
+
+a
+
+b
+
+e
+
+M1
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+Job Scheduling without Deadline
+• Greedy Choice: If an old machine becomes available by the start time
+of the task to be assigned, assign the task to this machine; if not,
+assign it to a new machine.
+
+Job Scheduling without Deadline
+
+Job Scheduling without Deadline--Correctness
+• Proof by Induction on number of machines
+• Base Case: Prove that the largest number of tasks that can be
+scheduled on the machine is given by the following greedy algorithm:
+From the Remaining tasks, select the one that has the least finish time
+and does not overlap with any of the already selected tasks.
+
+Job Scheduling with Deadline
+• We are given a set of
+jobs. Associated with job
+deadline
+and a profit
+.
+
+• For any job
+deadline.
+
+the profit
+
+is an integer
+
+is earned iff the job is completed by its
+
+• To complete a job, one has to process the job on a machine for one
+unit of time.
+• Only one machine is available for processing jobs.
+
+Job Scheduling with Deadline
+• Example: Let
+
+are:
+
+,
+
+and
+. The feasible solutions and their values
+
+Feasible Solution
+
+Processing Sequence
+
+Value
+
+1
+
+(1, 2)
+
+2,1
+
+110
+
+2
+
+(1, 3)
+
+1,3 or 3,1
+
+115
+
+3
+
+(1, 4)
+
+4, 1
+
+127
+
+4
+
+(2, 3)
+
+2, 3
+
+25
+
+5
+
+(3, 4)
+
+4, 3
+
+42
+
+6
+
+(1)
+
+1
+
+100
+
+7
+
+(2)
+
+2
+
+10
+
+8
+
+(3)
+
+3
+
+15
+
+9
+
+(4)
+
+4
+
+27
+
+Job Scheduling with Deadline
+• Greedy Choice Property: Choose
+as our optimization
+measure.
+Using this measure, the next job to include is the one that increases
+the most, subject to the constraint that the resulting
+is a
+feasible solution.
+• Thus consider jobs in non-increasing order of the
+
+Job Scheduling with Deadline—Checking
+Feasibility
+• Theorem: Let
+be a set of
+jobs and
+a
+permutation of jobs in such that
+. Then
+is a feasible solution iff the jobs in can be processed in the order
+without violating any deadline.
+
+Job Scheduling with Deadline—Checking
+Feasibility
+• Clearly, if the jobs in
+can be processed in the order
+violating any deadline, then is a feasible solution.
+
+• Enough to show that if is feasible then
+order in which the jobs can be processed.
+
+without
+
+represents a possible
+
+• Idea is to transform any other feasible processing order to
+
+.
+
+Job Scheduling with Deadline—Checking
+Feasibility
+• If
+
+is feasible, then there exists
+
+• Assume
+• Let
+• In
+
+. Then let
+
+such that
+
+be the least index such that
+
+. Clearly,
+.
+we can interchange
+and
+
+. Since
+
+.
+
+Job Scheduling with Deadline—Checking
+Feasibility
+• The resulting permutation
+represents an order
+in which the jobs can be processed without violating a deadline.
+
+Job Scheduling with Deadline
+• Theorem: The greedy method described before always obtains an
+optimal solution to the job sequencing problem.
+
+Job Scheduling with Deadline—Greedy Choice
+• Let
+be the set of jobs in the greedy solution and
+Jobs in the optimal solution
+
+• Observation:
+• Consider jobs
+
+be the set of
+
+Job Scheduling with Deadline—Greedy Choice
+• Consider a particular schedule
+• Show that the common jobs in
+can be scheduled at the
+same time in both the schedules while preserving feasibility.
+• Now, choose job ‘a’ as before but with highest profit. Show that
+
+• Replace b from the transformed schedule
+
+with a.
+
+Job Scheduling with Deadline—Greedy Choice
+• Repeat the above steps to transform J to I.
+
+Job Scheduling with Deadline--Algorithm
+
+Dynamic Programming -- Introduction
+
+

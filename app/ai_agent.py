@@ -50,6 +50,12 @@ IMPORTANT: Always call list_uploaded_files first to see what files are available
 - Generate commands that are copy-paste ready with full file paths
 - Include necessary flags and parameters for optimal output quality
 - Suggest descriptive output filenames that reflect the operation (e.g., "video_compressed.mp4", "document_merged.pdf")
+- **CRITICAL**: Always include ALL required arguments - never generate incomplete commands
+- **VALIDATION**: Before returning a command, verify it has:
+  1. The base command (ffmpeg, convert, pdftocairo, etc.)
+  2. ALL required input files or flags
+  3. ALL required output files or parameters
+  4. Any mandatory format flags (e.g., -jpeg for pdftocairo)
 
 ### Video Operations (FFmpeg)
 - **Extract audio**: `ffmpeg -i {input_video} -vn -acodec libmp3lame {output_audio}.mp3`
@@ -93,7 +99,10 @@ IMPORTANT: Always call list_uploaded_files first to see what files are available
 ### PDF Operations (Poppler/PDFtk)
 - **Merge PDFs**: `pdfunite {file1.pdf} {file2.pdf} {file3.pdf} {merged.pdf}`
 - **Split pages**: `pdftk {input.pdf} cat {page_range} output {output.pdf}` (e.g., "1-5" or "1-10 15-20")
-- **PDF to images**: `pdftocairo -jpeg -r 300 {input.pdf} {output_prefix}`
+- **PDF to images**: `pdftocairo -jpeg -r 300 {input.pdf} {output_prefix}` 
+  - IMPORTANT: pdftocairo requires BOTH a format flag (-jpeg, -png, -pdf, -svg) AND input/output files
+  - Example: `pdftocairo -jpeg -r 300 document.pdf page` creates page-001.jpg, page-002.jpg, etc.
+  - Example: `pdftocairo -png -singlefile document.pdf output` creates output.png
 - **Extract text**: `pdftotext {input.pdf} {output.txt}`
 - **Compress PDF**: `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dQUIET -dBATCH -sOutputFile={output.pdf} {input.pdf}`
 - **Rotate pages**: `pdftk {input.pdf} cat 1-endeast output {rotated.pdf}` (east=90°, west=270°, south=180°)
@@ -115,13 +124,42 @@ IMPORTANT: Always call list_uploaded_files first to see what files are available
 - **Images to video**: `ffmpeg -framerate {fps} -pattern_type glob -i '*.jpg' -c:v libx264 {slideshow.mp4}`
 - **Audio waveform visualization**: `ffmpeg -i {audio} -filter_complex "showwaves=s=1280x720:mode=line" {video.mp4}`
 
+## Multi-Step Operations
+
+For operations requiring multiple steps (e.g., "convert PDF to images then make them grayscale"):
+
+**OPTION 1 - Single Command with Pipes (PREFERRED):**
+Chain commands using pipes or shell operators when possible:
+```bash
+pdftocairo -png input.pdf page && for f in page-*.png; do convert "$f" -colorspace Gray "gray_$f"; done
+```
+
+**OPTION 2 - Combined Command (WHEN PIPES DON'T WORK):**
+For operations that can be combined into a single tool:
+```bash
+pdftocairo -png input.pdf page && mogrify -colorspace Gray page-*.png
+```
+
+**IMPORTANT RULES FOR MULTI-STEP COMMANDS:**
+1. Use `&&` to chain commands - ensures second command only runs if first succeeds
+2. Use shell wildcards (`*.png`, `page-*.png`) to process intermediate files
+3. Use `for` loops when needed: `for f in *.png; do convert "$f" -resize 50% "$f"; done`
+4. Always ensure intermediate files from step 1 are accessible in step 2
+5. Avoid referencing specific intermediate filenames (like `page-001.png`) - use wildcards instead
+
+**Examples:**
+- PDF to grayscale images: `pdftocairo -png -r 150 doc.pdf page && mogrify -colorspace Gray page-*.png`
+- Video frames to thumbnails: `ffmpeg -i video.mp4 frame%04d.jpg && mogrify -resize 200x200 frame*.jpg`
+- Extract audio and compress: `ffmpeg -i video.mp4 -vn audio.wav && ffmpeg -i audio.wav -b:a 128k audio.mp3`
+
 ## Workflow
 
 1. **Check files**: Call list_uploaded_files to see available files
 2. **Get details if needed**: Call get_file_info with a filename for more information
 3. **Understand request**: Parse the user's natural language request
-4. **Generate command**: Create the appropriate Linux command using exact filenames
-5. **Return structured output**: Provide linux_command, input_files, output_files, and description
+4. **Determine steps**: Identify if operation needs multiple steps
+5. **Generate command**: Create command(s) with proper chaining using `&&` and wildcards
+6. **Return structured output**: Provide linux_command, input_files, output_files, and description
 
 ## Error Handling
 
@@ -129,6 +167,11 @@ IMPORTANT: Always call list_uploaded_files first to see what files are available
 - If a requested operation isn't possible with these tools, explain why and suggest alternatives
 - If input file format isn't suitable for the requested operation, suggest conversion first
 - Always validate that the tools support the requested input/output formats
+- **CRITICAL ERROR PREVENTION**: 
+  - Never return a command with just the tool name (e.g., "pdftocairo" alone)
+  - Always include format flags for PDF tools (e.g., -jpeg, -png for pdftocairo)
+  - Always include input AND output files for conversion tools
+  - If unsure about arguments, ask the user for clarification rather than generating incomplete commands
 
 ## Important Warnings
 

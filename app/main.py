@@ -57,6 +57,83 @@ def get_user_id():
         return None
     return f"{os.getuid()}:{os.getgid()}"
 
+def validate_command(command: str) -> tuple[bool, str]:
+    """
+    Validate that a command has proper arguments and is not just showing help.
+    Handles chained commands with && operators.
+    
+    Args:
+        command: The Linux command to validate (may contain && for chaining)
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    command = command.strip()
+    
+    # Check if command is empty
+    if not command:
+        return False, "Command is empty"
+    
+    # Split by && to handle chained commands
+    command_parts = [part.strip() for part in command.split('&&') if part.strip()]
+    
+    if len(command_parts) == 0:
+        return False, "Command has no parts"
+    
+    # Validate each command in the chain
+    for cmd_part in command_parts:
+        # Skip validation for shell loops and control structures
+        if cmd_part.startswith('for ') or cmd_part.startswith('while ') or cmd_part.startswith('if '):
+            continue  # Complex shell constructs are allowed
+        
+        # Split command to get the base command and arguments
+        parts = cmd_part.split()
+        if len(parts) == 0:
+            continue
+        
+        base_cmd = parts[0]
+        
+        # Commands that require specific arguments
+        commands_needing_args = {
+            'pdftocairo': ['input.pdf', 'output'],
+            'pdftotext': ['input.pdf'],
+            'pdfimages': ['input.pdf', 'prefix'],
+            'pdfinfo': ['input.pdf'],
+            'ffmpeg': ['-i'],
+            'convert': ['input'],
+            'mogrify': ['input'],
+            'tesseract': ['input', 'output'],
+        }
+        
+        # Check if this command requires arguments
+        if base_cmd in commands_needing_args:
+            # For pdftocairo specifically, check for output format flags
+            if base_cmd == 'pdftocairo':
+                has_format = any(flag in cmd_part for flag in ['-png', '-jpeg', '-pdf', '-svg', '-tiff', '-ps', '-eps'])
+                if not has_format:
+                    return False, f"pdftocairo command missing output format flag (-png, -jpeg, -pdf, etc.)"
+                
+                # Check for input/output files (at least 2 arguments after flags)
+                non_flag_args = [p for p in parts[1:] if not p.startswith('-')]
+                if len(non_flag_args) < 2:
+                    return False, f"pdftocairo command missing input PDF and/or output file arguments"
+            
+            # For ffmpeg, check for -i flag
+            elif base_cmd == 'ffmpeg':
+                if '-i' not in cmd_part:
+                    return False, "ffmpeg command missing -i input file flag"
+            
+            # For mogrify, it can work with wildcards, so be lenient
+            elif base_cmd == 'mogrify':
+                if len(parts) < 2:
+                    return False, f"mogrify command appears to be missing required arguments"
+            
+            # Generic check for minimum number of arguments
+            elif len(parts) < 2:
+                return False, f"{base_cmd} command appears to be missing required arguments"
+    
+    return True, ""
+
 def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: List[str]) -> List[str]:
     """
     Execute a Linux command in a Docker container with user directory mounted.
@@ -71,6 +148,14 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
     Returns:
         List of newly created output files
     """
+    # Validate command before execution
+    is_valid, error_msg = validate_command(linux_command)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid command: {error_msg}. The AI may have generated an incomplete command. Please try rephrasing your request or provide more specific details."
+        )
+    
     client = get_docker_client()
     
     # Get list of files before execution
@@ -97,53 +182,53 @@ def execute_command_in_docker(user_dir: Path, linux_command: str, input_files: L
         'SAL_USE_VCLPLUGIN': 'svp',  # Use headless backend for LibreOffice
     }
     
-    # Detect and split multiple commands
-    # Commands can be separated by && or by newlines
-    commands = []
-    
-    # First, split by newlines and clean up
-    lines = [line.strip() for line in linux_command.split('\n') if line.strip()]
-    
-    # Then, split each line by && if present
-    for line in lines:
-        if '&&' in line:
-            # Split by && and add each part
-            parts = [part.strip() for part in line.split('&&') if part.strip()]
-            commands.extend(parts)
-        else:
-            commands.append(line)
-    
-    # If we ended up with just one command, keep it simple
-    if len(commands) == 1:
-        commands = [linux_command.strip()]
+    # Check if command contains shell features that require /bin/sh -c
+    needs_shell = any([
+        '&&' in linux_command,  # Command chaining
+        '||' in linux_command,  # Or operator
+        '|' in linux_command and '|' not in '||',  # Pipes (but not ||)
+        'for ' in linux_command,  # For loops
+        'while ' in linux_command,  # While loops
+        '*' in linux_command,  # Wildcards
+        '?' in linux_command,  # Wildcards
+        '$(' in linux_command,  # Command substitution
+        '`' in linux_command,  # Command substitution
+    ])
     
     try:
-        # Execute commands sequentially
-        for cmd in commands:
-            # Add LibreOffice-specific options if the command contains libreoffice or soffice
-            if 'libreoffice' in cmd.lower() or 'soffice' in cmd.lower():
-                # Ensure the command uses proper LibreOffice headless options
-                if '--headless' not in cmd and '-headless' not in cmd:
-                    cmd = cmd.replace('libreoffice', 'libreoffice --headless', 1)
-                    cmd = cmd.replace('soffice', 'soffice --headless', 1)
-                
-                # Add user profile directory option
-                if '-env:UserInstallation' not in cmd:
-                    # Use a temporary user profile in /tmp
-                    cmd = cmd.replace('--headless', '--headless -env:UserInstallation=file:///tmp/libreoffice_profile', 1)
+        # Add LibreOffice-specific options if needed
+        cmd = linux_command.strip()
+        if 'libreoffice' in cmd.lower() or 'soffice' in cmd.lower():
+            # Ensure the command uses proper LibreOffice headless options
+            if '--headless' not in cmd and '-headless' not in cmd:
+                cmd = cmd.replace('libreoffice', 'libreoffice --headless', 1)
+                cmd = cmd.replace('soffice', 'soffice --headless', 1)
             
-            # Run each command in the container
-            container_logs = client.containers.run(
-                DOCKER_IMAGE_NAME,
-                command=cmd,
-                remove=True,
-                volumes=volumes_dict,
-                user=user_id,
-                environment=environment,
-                stdout=True,
-                stderr=True,
-                working_dir=CONTAINER_MOUNT_PATH
-            )
+            # Add user profile directory option
+            if '-env:UserInstallation' not in cmd:
+                # Use a temporary user profile in /tmp
+                cmd = cmd.replace('--headless', '--headless -env:UserInstallation=file:///tmp/libreoffice_profile', 1)
+        
+        # Prepare command for Docker
+        if needs_shell:
+            # Use shell to execute complex commands
+            docker_command = ['/bin/sh', '-c', cmd]
+        else:
+            # Execute simple commands directly
+            docker_command = cmd
+        
+        # Run command in the container
+        container_logs = client.containers.run(
+            DOCKER_IMAGE_NAME,
+            command=docker_command,
+            remove=True,
+            volumes=volumes_dict,
+            user=user_id,
+            environment=environment,
+            stdout=True,
+            stderr=True,
+            working_dir=CONTAINER_MOUNT_PATH
+        )
         
         # Get list of files after execution
         files_after = set()
